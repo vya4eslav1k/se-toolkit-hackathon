@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: poll-service-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-polls}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./core/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-polls}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - poll-service-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: poll-service-backend
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-polls}
+      SERVER_PORT: 8080
+      COOKIE_SECRET: ${COOKIE_SECRET:-super-secret-key-change-in-production}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - poll-service-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.frontend
+      args:
+        REACT_APP_API_URL: http://localhost:8080/api
+    container_name: poll-service-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - poll-service-network
+
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.telegram
+    container_name: poll-service-telegram
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      BACKEND_API_URL: http://backend:8080/api
+    depends_on:
+      - backend
+    networks:
+      - poll-service-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  poll-service-network:
+    driver: bridge
